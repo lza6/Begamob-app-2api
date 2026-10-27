@@ -40,7 +40,7 @@ curl http://127.0.0.1:8915/v1/chat/completions \
 | `POST /api/v1/suggestChatQuestion` | 推荐提问 | 已还原 |
 | `POST api/v1/generate_art`、`/api/v2/art` | AI 绘图（走 aiapi-art.begamob.com） | 已还原 |
 | `GET /api/getTime` | 返回 `{token:"毫秒时间戳"}` | ✅ 实测打通 |
-| `wss://.../api/v1/ws/chat` | 流式 WebSocket | ⚠️ **服务端未注册（404）**，客户端有代码但上游关闭 |
+| `wss://.../api/v1/ws/chat` | 流式 WebSocket | ⚠️ **服务端未注册（404，7 种变体全测：子协议/别名路径/chat-ai-iaa 域/aiapi-art 域均 404）**，客户端有代码但上游关闭 |
 
 ### 2.2 鉴权：客户端自签 JWT（核心发现）
 
@@ -116,6 +116,8 @@ deepseek  claude  gemini  gpt        <- 短别名也有效（上游兜底）
 ```
 
 > ⚠️ **无效模型名不报错**：`nonexistent-xyz` 也返回 200（上游兜底默认模型）。渠道层做模型映射时要自己校验。
+>
+> ⚠️ **上下文硬上限 = 128K 中文字符**（127,900 过 / 128,000 报 400 `request_invalid`，二分法实测）。渠道层建议 127K 截断保护。
 
 ### 2.6 辅助发现
 
