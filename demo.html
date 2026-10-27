@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>ChatAI 35.2.8 渠道 Demo 网关</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0f1117; color: #e2e6f0; padding: 24px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; color: #7aa2ff; }
+  .sub { color: #8892a8; font-size: 12px; margin-bottom: 18px; }
+  .row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  select, input[type=text] { background: #1a1f2e; border: 1px solid #2c3450; color: #e2e6f0; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .msgs { background: #151a26; border: 1px solid #232a3d; border-radius: 12px; padding: 14px; height: 420px; overflow-y: auto; margin-bottom: 12px; }
+  .msg { margin-bottom: 10px; line-height: 1.55; font-size: 14px; }
+  .msg .who { font-size: 11px; color: #7aa2ff; margin-bottom: 2px; }
+  .msg.user .who { color: #f0c674; }
+  .msg pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+  textarea { width: 100%; background: #1a1f2e; border: 1px solid #2c3450; color: #e2e6f0; padding: 10px 12px; border-radius: 8px; font-size: 14px; resize: vertical; min-height: 64px; }
+  button { background: #3b5bdb; border: 0; color: #fff; padding: 9px 22px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  button:disabled { background: #2c3450; }
+  button.ghost { background: #232a3d; }
+  .meta { font-size: 11px; color: #55607a; margin-top: 10px; }
+  .stat { display: inline-block; margin-right: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🤖 ChatAI (Begamob) 35.2.8 — 渠道 Demo 网关</h1>
+  <div class="sub">demo_server.py @ 127.0.0.1:8915 · 上游 chatapi.begamob.com/api/v1/chat · JWT-HS256 自签 · 15 模型</div>
+  <div class="row">
+    <select id="model">
+      <optgroup label="OpenAI">
+        <option>gpt-4o-mini</option><option>gpt-4o</option><option>gpt-4.1</option>
+        <option>gpt-4.1-mini</option><option>gpt-5</option><option>gpt-5-mini</option>
+      </optgroup>
+      <optgroup label="Claude">
+        <option>claude-3.7-sonnet</option><option selected>claude-4.5-sonnet</option><option>claude-4.5-opus</option>
+      </optgroup>
+      <optgroup label="Gemini">
+        <option>gemini-2.5-flash</option><option>gemini-3-pro</option>
+      </optgroup>
+      <optgroup label="其他">
+        <option>deepseek</option><option>claude</option><option>gemini</option><option>gpt</option>
+      </optgroup>
+    </select>
+    <label style="font-size:13px;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="stream" checked> 流式 (本地模拟 SSE)
+    </label>
+    <button class="ghost" onclick="loadHealth()">健康检查</button>
+  </div>
+  <div class="msgs" id="msgs"></div>
+  <textarea id="input" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"></textarea>
+  <div class="row" style="margin-top:10px">
+    <button id="send" onclick="send()">发送</button>
+    <button class="ghost" onclick="clearAll()">清空</button>
+  </div>
+  <div class="meta" id="meta">—</div>
+</div>
+<script>
+const msgs = [{role:'system', content:'You are a helpful assistant.'}];
+const box = document.getElementById('msgs');
+function addMsg(role, text){
+  const d = document.createElement('div');
+  d.className = 'msg ' + role;
+  d.innerHTML = `<div class="who">${role==='user'?'你':'AI'}</div><pre></pre>`;
+  d.querySelector('pre').textContent = text;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+  return d.querySelector('pre');
+}
+async function send(){
+  const inp = document.getElementById('input');
+  const text = inp.value.trim();
+  if(!text) return;
+  inp.value = '';
+  addMsg('user', text);
+  msgs.push({role:'user', content:text});
+  const model = document.getElementById('model').value;
+  const stream = document.getElementById('stream').checked;
+  const pre = addMsg('assistant', stream ? '' : '…');
+  const t0 = performance.now();
+  document.getElementById('send').disabled = true;
+  try {
+    const resp = await fetch('/v1/chat/completions', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model, messages: msgs, max_tokens: 1024, stream})
+    });
+    if(!resp.ok){ const e = await resp.json(); throw new Error(e.error?.message || resp.status); }
+    if(stream){
+      const reader = resp.body.getReader(); const dec = new TextDecoder();
+      let buf = '', full = '';
+      while(true){
+        const {done, value} = await reader.read();
+        if(done) break;
+        buf += dec.decode(value, {stream:true});
+        let idx;
+        while((idx = buf.indexOf('\n\n')) >= 0){
+          const line = buf.slice(0, idx).trim(); buf = buf.slice(idx+2);
+          if(!line.startsWith('data: ')) continue;
+          const payload = line.slice(6);
+          if(payload === '[DONE]') continue;
+          const j = JSON.parse(payload);
+          const c = j.choices?.[0]?.delta?.content || '';
+          full += c; pre.textContent = full; box.scrollTop = box.scrollHeight;
+        }
+      }
+      msgs.push({role:'assistant', content: full});
+      document.getElementById('meta').textContent = `流式 · ${model} · ${(performance.now()-t0).toFixed(0)}ms`;
+    } else {
+      const j = await resp.json();
+      const content = j.choices?.[0]?.message?.content || '';
+      pre.textContent = content;
+      msgs.push({role:'assistant', content});
+      document.getElementById('meta').textContent =
+        `非流式 · ${model} · 总耗时 ${(performance.now()-t0).toFixed(0)}ms · 上游 ${j.x_upstream_ms}ms`;
+    }
+  } catch(e){
+    pre.textContent = '❌ ' + e.message;
+  }
+  document.getElementById('send').disabled = false;
+}
+async function loadHealth(){
+  const t0 = performance.now();
+  const r = await (await fetch('/health')).json();
+  const s = await (await fetch('/stats')).json();
+  document.getElementById('meta').textContent =
+    `health=${r.status} · 本地请求总数 ${s.requests} · 上游成功 ${s.upstream_ok} · 失败 ${s.upstream_err} · 检查耗时 ${(performance.now()-t0).toFixed(0)}ms`;
+}
+function clearAll(){ box.innerHTML=''; msgs.length = 1; document.getElementById('meta').textContent='—'; }
+document.getElementById('input').addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+});
+</script>
+</body>
+</html>
